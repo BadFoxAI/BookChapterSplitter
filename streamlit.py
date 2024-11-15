@@ -112,10 +112,10 @@ class SlideshowGenerator:
                 clip = ImageClip(img_path)
                 
                 target_width, source_height, mode = settings['resolution']
-                clip = clip.resize((target_width, source_height))
+                clip = clip.resize((target_width, source_height), resample=Image.Resampling.LANCZOS)
                 
                 if mode == 'anamorphic':
-                    clip = clip.resize((target_width, target_width))
+                    clip = clip.resize((target_width, target_width), resample=Image.Resampling.LANCZOS)
                 
                 clip = clip.set_duration(settings['image_duration'])
                 clips.append(clip)
