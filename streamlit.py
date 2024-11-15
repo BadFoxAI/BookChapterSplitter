@@ -56,13 +56,10 @@ class SlideshowGenerator:
         status_text = st.empty()
 
         try:
-            writer = imageio.get_writer(
-                os.path.join(self.output_dir, f"{settings['filename']}.mp4"),
-                fps=24,
-                codec='h264',
-                quality=8  # 0-10, where 10 is highest quality
-            )
-
+            output_path = os.path.join(self.output_dir, f"{settings['filename']}.mp4")
+            
+            # Prepare all frames first
+            frames = []
             for idx, img_path in enumerate(image_files):
                 status_text.text(f"Processing image {idx + 1}/{len(image_files)} ✨")
                 
@@ -71,16 +68,23 @@ class SlideshowGenerator:
                 img = img.resize((1024, 512), Image.Resampling.LANCZOS)
                 img = np.array(img)
                 
-                # Write frames for duration
+                # Add frames for duration
                 frames_per_image = int(24 * settings['image_duration'])  # 24 fps
-                for _ in range(frames_per_image):
-                    writer.append_data(img)
+                frames.extend([img] * frames_per_image)
                 
                 progress = (idx + 1) / len(image_files)
                 progress_bar.progress(progress)
 
-            writer.close()
-            return os.path.join(self.output_dir, f"{settings['filename']}.mp4")
+            status_text.text("Creating video file... ✨")
+            # Write all frames at once
+            imageio.mimsave(
+                output_path,
+                frames,
+                fps=24,
+                quality=7  # Lower quality for better compatibility
+            )
+
+            return output_path
 
         except Exception as e:
             raise e
