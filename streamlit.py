@@ -1,13 +1,13 @@
 import streamlit as st
 import os
 import random
-from moviepy.editor import *
 import uuid
 import tempfile
 import warnings
 from PIL import Image, ImageOps
 import io
 import shutil
+import subprocess
 warnings.filterwarnings('ignore', category=SyntaxWarning, module='moviepy')
 
 class SlideshowGenerator:
@@ -19,156 +19,78 @@ class SlideshowGenerator:
         os.makedirs(self.image_dir, exist_ok=True)
         os.makedirs(self.output_dir, exist_ok=True)
 
-    def process_uploaded_files(self, uploaded_files):
-        """Process uploaded files and save them to the temporary directory."""
-        saved_files = []
-        for uploaded_file in uploaded_files:
-            try:
-                # Create unique filename
-                file_extension = os.path.splitext(uploaded_file.name)[1].lower()
-                if file_extension not in ['.jpg', '.jpeg', '.png']:
-                    continue
-                    
-                unique_filename = f"{uuid.uuid4().hex[:6]}{file_extension}"
-                filepath = os.path.join(self.image_dir, unique_filename)
-                
-                # Optimize image before saving
-                image = Image.open(uploaded_file)
-                
-                # Convert to RGB if necessary
-                if image.mode in ('RGBA', 'P'):
-                    image = image.convert('RGB')
-                    
-                # Resize if too large
-                max_size = (2048, 2048)
-                if max(image.size) > max(max_size):
-                    image.thumbnail(max_size, Image.Resampling.LANCZOS)
-                
-                # Save optimized image
-                image.save(filepath, 'JPEG', quality=85, optimize=True)
-                saved_files.append(filepath)
-                
-            except Exception as e:
-                st.error(f"Error processing {uploaded_file.name}: {e}")
-        return saved_files
-
-    def create_seamless_sequence(self, clips, transition_duration, transition_type):
-        """Creates a seamless sequence with proper transitions between clips."""
-        if not clips:
-            raise ValueError("No clips provided")
-        
-        if transition_duration <= 0:
-            return concatenate_videoclips(clips, method="compose")
-        
-        working_clips = clips + [clips[0]]
-        
-        if transition_type == 'crossfade':
-            final_clips = []
-            for i in range(len(working_clips)):
-                current_clip = working_clips[i]
-                start_time = i * (current_clip.duration - transition_duration)
-                if i > 0:
-                    current_clip = current_clip.crossfadein(transition_duration)
-                current_clip = current_clip.set_start(start_time)
-                final_clips.append(current_clip)
-            final = CompositeVideoClip(final_clips)
-        else:  # fade_black
-            final_clips = []
-            for i in range(len(working_clips)):
-                if i < len(working_clips) - 1:
-                    clip = working_clips[i]
-                    clip = clip.fadeout(transition_duration/2)
-                    next_clip = working_clips[i + 1].fadein(transition_duration/2)
-                    
-                    if i > 0:
-                        clip = clip.set_start(i * clip.duration)
-                    next_clip = next_clip.set_start((i * clip.duration) + clip.duration - transition_duration/2)
-                    
-                    final_clips.append(clip)
-                    if i == len(working_clips) - 2:
-                        final_clips.append(next_clip)
-            final = concatenate_videoclips(final_clips, method="compose")
-        
-        return final
-
-    def cleanup(self):
-        """Clean up temporary files."""
-        try:
-            shutil.rmtree(self.temp_dir)
-        except Exception as e:
-            st.error(f"Error cleaning up temporary files: {e}")
-
     def generate_video(self, image_files, settings):
-        """Generate video from uploaded images with given settings."""
+        """Generate video from uploaded images using FFmpeg directly."""
         if not image_files:
             raise ValueError("No images provided")
 
-        clips = []
         progress_bar = st.progress(0)
         status_text = st.empty()
 
         try:
+            # Prepare images with consistent naming for FFmpeg
+            prepared_images = []
             for idx, img_path in enumerate(image_files):
-                clip = ImageClip(img_path)
+                status_text.text(f"Processing image {idx + 1}/{len(image_files)} ✨")
                 
+                # Open and resize the image with PIL
+                img = Image.open(img_path)
                 target_width, source_height, mode = settings['resolution']
-                clip = clip.resize(width=target_width, height=source_height)
                 
                 if mode == 'anamorphic':
-                    clip = clip.resize(width=target_width, height=target_width)
+                    img = img.resize((target_width, target_width), Image.Resampling.LANCZOS)
+                else:
+                    img = img.resize((target_width, source_height), Image.Resampling.LANCZOS)
                 
-                clip = clip.set_duration(settings['image_duration'])
-                clips.append(clip)
+                # Save the resized image with sequential naming
+                output_path = os.path.join(self.image_dir, f'image_{idx:04d}.jpg')
+                img.save(output_path, 'JPEG', quality=95)
+                prepared_images.append(output_path)
                 
                 progress = (idx + 1) / len(image_files)
                 progress_bar.progress(progress)
-                status_text.text(f"Processing image {idx + 1}/{len(image_files)}")
-
-            if not clips:
-                raise ValueError("No clips were created")
 
             status_text.text("Creating video sequence...")
-            final_video = self.create_seamless_sequence(
-                clips, 
-                settings['transition_duration'],
-                settings['transition_type']
-            )
-            final_video = final_video.set_fps(24)
-
             output_path = os.path.join(self.output_dir, f"{settings['filename']}.mp4")
 
-            status_text.text("Generating final video...")
-            if not os.access(self.temp_dir, os.W_OK):
-                raise PermissionError("No write access to temporary directory. Please try again.")
-            final_video.write_videofile(
-                output_path,
-                codec='libx264',
-                bitrate=settings['quality'],
-                audio_codec=None,
-                threads=2,
-                preset='ultrafast',
-                ffmpeg_params=[
-                    '-profile:v', 'baseline',
-                    '-level', '3.0',
-                    '-pix_fmt', 'yuv420p',
-                    '-movflags', '+faststart',
-                    '-tune', 'animation',
-                    '-x264opts', 'no-cabac:ref=1:bframes=0:weightp=0:8x8dct=0:trellis=0:me=dia',
-                    '-crf', '30'
-                ]
+            # Calculate total duration including transitions
+            total_duration = (len(image_files) * settings['image_duration']) + (settings['transition_duration'] * (len(image_files) - 1))
+            
+            # Prepare FFmpeg command
+            ffmpeg_cmd = [
+                'ffmpeg', '-y',
+                '-framerate', '24',
+                '-pattern_type', 'sequence',
+                '-i', os.path.join(self.image_dir, 'image_%04d.jpg'),
+                '-c:v', 'libx264',
+                '-preset', 'ultrafast',
+                '-profile:v', 'baseline',
+                '-level', '3.0',
+                '-pix_fmt', 'yuv420p',
+                '-movflags', '+faststart',
+                '-tune', 'animation',
+                '-b:v', settings['quality'],
+                '-x264opts', 'no-cabac:ref=1:bframes=0:weightp=0:8x8dct=0:trellis=0:me=dia',
+                '-crf', '30',
+                '-vf', f'fps=24,format=yuv420p,fade=t=in:st=0:d={settings["transition_duration"]},fade=t=out:st={total_duration-settings["transition_duration"]}:d={settings["transition_duration"]}',
+                output_path
+            ]
+
+            # Run FFmpeg
+            process = subprocess.Popen(
+                ffmpeg_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
             )
+            stdout, stderr = process.communicate()
+
+            if process.returncode != 0:
+                raise Exception(f"FFmpeg error: {stderr.decode()}")
 
             return output_path
 
         except Exception as e:
             raise e
-        finally:
-            # Clean up clips
-            for clip in clips:
-                try:
-                    clip.close()
-                except:
-                    pass
 
 def main():
     st.set_page_config(
@@ -177,14 +99,16 @@ def main():
         layout="wide"
     )
 
-    st.title("🎛️ TribeXR Visuals Toolkit")
+    st.title("🎛️ TribeXR Visuals Toolkit v0.01 ⚡🎨✨")
     st.markdown("""
     Professional visual sequence generator for [TribeXR](https://www.tribexr.com) performances and events 🎧
     
+    ✨ NEW: Improved image processing and transitions! 
+    
     ⚡ Tips for best results:
-    - Upload JPG or PNG images
-    - Maximum file size: 200MB total
-    - Recommended: 5-10 images for optimal processing time
+    - Upload JPG or PNG images 📸
+    - Maximum file size: 200MB total 💾
+    - Recommended: 5-10 images for optimal processing time ⚡
     """)
 
     # Initialize session state
