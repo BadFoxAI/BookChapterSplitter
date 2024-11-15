@@ -7,6 +7,9 @@ import warnings
 from PIL import Image
 import shutil
 import subprocess
+import cv2
+import numpy as np
+import imageio
 
 class SlideshowGenerator:
     def __init__(self):
@@ -56,55 +59,31 @@ class SlideshowGenerator:
         status_text = st.empty()
 
         try:
-            prepared_images = []
+            writer = imageio.get_writer(
+                os.path.join(self.output_dir, f"{settings['filename']}.mp4"),
+                fps=24,
+                codec='h264',
+                quality=8  # 0-10, where 10 is highest quality
+            )
+
             for idx, img_path in enumerate(image_files):
                 status_text.text(f"Processing image {idx + 1}/{len(image_files)} ✨")
                 
+                # Read and process image
                 img = Image.open(img_path)
-                # Fixed 1024x512 resolution
                 img = img.resize((1024, 512), Image.Resampling.LANCZOS)
+                img = np.array(img)
                 
-                output_path = os.path.join(self.image_dir, f'image_{idx:04d}.jpg')
-                img.save(output_path, 'JPEG', quality=95)
-                prepared_images.append(output_path)
+                # Write frames for duration
+                frames_per_image = int(24 * settings['image_duration'])  # 24 fps
+                for _ in range(frames_per_image):
+                    writer.append_data(img)
                 
                 progress = (idx + 1) / len(image_files)
                 progress_bar.progress(progress)
 
-            status_text.text("Creating video sequence...")
-            output_path = os.path.join(self.output_dir, f"{settings['filename']}.mp4")
-
-            total_duration = (len(image_files) * settings['image_duration'])
-            
-            ffmpeg_cmd = [
-                'ffmpeg', '-y',
-                '-framerate', '24',
-                '-pattern_type', 'sequence',
-                '-i', os.path.join(self.image_dir, 'image_%04d.jpg'),
-                '-c:v', 'libx264',
-                '-preset', 'ultrafast',
-                '-profile:v', 'baseline',
-                '-level', '3.0',
-                '-pix_fmt', 'yuv420p',
-                '-movflags', '+faststart',
-                '-tune', 'animation',
-                '-b:v', settings['quality'],
-                '-x264opts', 'no-cabac:ref=1:bframes=0:weightp=0:8x8dct=0:trellis=0:me=dia',
-                '-vf', f'fps=24,format=yuv420p',
-                output_path
-            ]
-
-            process = subprocess.Popen(
-                ffmpeg_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-            stdout, stderr = process.communicate()
-
-            if process.returncode != 0:
-                raise Exception(f"FFmpeg error: {stderr.decode()}")
-
-            return output_path
+            writer.close()
+            return os.path.join(self.output_dir, f"{settings['filename']}.mp4")
 
         except Exception as e:
             raise e
