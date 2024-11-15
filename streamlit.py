@@ -7,6 +7,7 @@ from PIL import Image
 import shutil
 import numpy as np
 import imageio
+from moviepy.editor import ImageSequenceClip
 
 class SlideshowGenerator:
     def __init__(self):
@@ -56,9 +57,7 @@ class SlideshowGenerator:
         status_text = st.empty()
 
         try:
-            output_path = os.path.join(self.output_dir, f"{settings['filename']}.mp4")
-            
-            # Prepare all frames first
+            # Process images
             frames = []
             for idx, img_path in enumerate(image_files):
                 status_text.text(f"Processing image {idx + 1}/{len(image_files)} ✨")
@@ -66,22 +65,28 @@ class SlideshowGenerator:
                 # Read and process image
                 img = Image.open(img_path)
                 img = img.resize((1024, 512), Image.Resampling.LANCZOS)
-                img = np.array(img)
-                
-                # Add frames for duration
-                frames_per_image = int(24 * settings['image_duration'])  # 24 fps
-                frames.extend([img] * frames_per_image)
+                img_array = np.array(img)
+                frames.append(img_array)
                 
                 progress = (idx + 1) / len(image_files)
                 progress_bar.progress(progress)
 
-            status_text.text("Creating video file... ✨")
-            # Write all frames at once
-            imageio.mimsave(
+            status_text.text("Creating video... ✨")
+            
+            # Create video using moviepy
+            output_path = os.path.join(self.output_dir, f"{settings['filename']}.mp4")
+            
+            clip = ImageSequenceClip(frames, fps=24)
+            clip = clip.set_duration(len(image_files) * settings['image_duration'])
+            
+            clip.write_videofile(
                 output_path,
-                frames,
                 fps=24,
-                quality=7  # Lower quality for better compatibility
+                codec='libx264',
+                bitrate=settings['quality'],
+                audio=False,
+                preset='ultrafast',
+                threads=2
             )
 
             return output_path
@@ -96,7 +101,7 @@ def main():
         layout="wide"
     )
 
-    st.title("🎨 Visual Sequence Generator v0.02 ✨")
+    st.title("🎨 Visual Sequence Generator v0.03 ✨")
     
     st.markdown("""
     ### Create stunning visual sequences for your performances and events 🎭
