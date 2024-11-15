@@ -4,23 +4,51 @@ import random
 import uuid
 import tempfile
 import warnings
-from PIL import Image, ImageOps
-import io
+from PIL import Image
 import shutil
 import subprocess
-warnings.filterwarnings('ignore', category=SyntaxWarning, module='moviepy')
 
 class SlideshowGenerator:
     def __init__(self):
-        """Initialize the slideshow generator with default settings."""
         self.temp_dir = tempfile.mkdtemp()
         self.image_dir = os.path.join(self.temp_dir, 'images')
         self.output_dir = os.path.join(self.temp_dir, 'output')
         os.makedirs(self.image_dir, exist_ok=True)
         os.makedirs(self.output_dir, exist_ok=True)
 
+    def process_uploaded_files(self, uploaded_files):
+        """Process uploaded files and save them to the temporary directory."""
+        saved_files = []
+        for uploaded_file in uploaded_files:
+            try:
+                file_extension = os.path.splitext(uploaded_file.name)[1].lower()
+                if file_extension not in ['.jpg', '.jpeg', '.png']:
+                    continue
+                    
+                unique_filename = f"{uuid.uuid4().hex[:6]}{file_extension}"
+                filepath = os.path.join(self.image_dir, unique_filename)
+                
+                # Process image
+                image = Image.open(uploaded_file)
+                if image.mode in ('RGBA', 'P'):
+                    image = image.convert('RGB')
+                
+                # Save processed image
+                image.save(filepath, 'JPEG', quality=95)
+                saved_files.append(filepath)
+                
+            except Exception as e:
+                st.error(f"Error processing {uploaded_file.name}: {e}")
+        return saved_files
+
+    def cleanup(self):
+        """Clean up temporary files."""
+        try:
+            shutil.rmtree(self.temp_dir)
+        except Exception as e:
+            st.error(f"Error cleaning up: {e}")
+
     def generate_video(self, image_files, settings):
-        """Generate video from uploaded images using FFmpeg directly."""
         if not image_files:
             raise ValueError("No images provided")
 
@@ -28,21 +56,14 @@ class SlideshowGenerator:
         status_text = st.empty()
 
         try:
-            # Prepare images with consistent naming for FFmpeg
             prepared_images = []
             for idx, img_path in enumerate(image_files):
                 status_text.text(f"Processing image {idx + 1}/{len(image_files)} ✨")
                 
-                # Open and resize the image with PIL
                 img = Image.open(img_path)
-                target_width, source_height, mode = settings['resolution']
+                # Fixed 1024x512 resolution
+                img = img.resize((1024, 512), Image.Resampling.LANCZOS)
                 
-                if mode == 'anamorphic':
-                    img = img.resize((target_width, target_width), Image.Resampling.LANCZOS)
-                else:
-                    img = img.resize((target_width, source_height), Image.Resampling.LANCZOS)
-                
-                # Save the resized image with sequential naming
                 output_path = os.path.join(self.image_dir, f'image_{idx:04d}.jpg')
                 img.save(output_path, 'JPEG', quality=95)
                 prepared_images.append(output_path)
@@ -53,10 +74,8 @@ class SlideshowGenerator:
             status_text.text("Creating video sequence...")
             output_path = os.path.join(self.output_dir, f"{settings['filename']}.mp4")
 
-            # Calculate total duration including transitions
-            total_duration = (len(image_files) * settings['image_duration']) + (settings['transition_duration'] * (len(image_files) - 1))
+            total_duration = (len(image_files) * settings['image_duration'])
             
-            # Prepare FFmpeg command
             ffmpeg_cmd = [
                 'ffmpeg', '-y',
                 '-framerate', '24',
@@ -71,12 +90,10 @@ class SlideshowGenerator:
                 '-tune', 'animation',
                 '-b:v', settings['quality'],
                 '-x264opts', 'no-cabac:ref=1:bframes=0:weightp=0:8x8dct=0:trellis=0:me=dia',
-                '-crf', '30',
-                '-vf', f'fps=24,format=yuv420p,fade=t=in:st=0:d={settings["transition_duration"]},fade=t=out:st={total_duration-settings["transition_duration"]}:d={settings["transition_duration"]}',
+                '-vf', f'fps=24,format=yuv420p',
                 output_path
             ]
 
-            # Run FFmpeg
             process = subprocess.Popen(
                 ffmpeg_cmd,
                 stdout=subprocess.PIPE,
@@ -94,16 +111,15 @@ class SlideshowGenerator:
 
 def main():
     st.set_page_config(
-        page_title="TribeXR Visuals Toolkit",
-        page_icon="🎛️",
+        page_title="Visual Sequence Generator",
+        page_icon="🎨",
         layout="wide"
     )
 
-    st.title("🎛️ TribeXR Visuals Toolkit v0.01 ⚡🎨✨")
-    st.markdown("""
-    Professional visual sequence generator for [TribeXR](https://www.tribexr.com) performances and events 🎧
+    st.title("🎨 Visual Sequence Generator v0.02 ✨")
     
-    ✨ NEW: Improved image processing and transitions! 
+    st.markdown("""
+    ### Create stunning visual sequences for your performances and events 🎭
     
     ⚡ Tips for best results:
     - Upload JPG or PNG images 📸
@@ -111,35 +127,42 @@ def main():
     - Recommended: 5-10 images for optimal processing time ⚡
     """)
 
-    # Initialize session state
+    st.write("")  # Add some spacing
+    
     if 'generator' not in st.session_state:
         st.session_state.generator = SlideshowGenerator()
 
     uploaded_files = st.file_uploader(
-        "Upload Images 🎬",
+        "Upload Your Images 🎬",
         type=['png', 'jpg', 'jpeg'],
         accept_multiple_files=True,
         help="Select multiple images to create your sequence"
     )
 
     if uploaded_files:
+        st.write("")  # Add spacing
         total_size = sum([file.size for file in uploaded_files])
-        if total_size > 200 * 1024 * 1024:  # 200MB
+        if total_size > 200 * 1024 * 1024:
             st.warning("⚠️ Total file size exceeds 200MB. This may cause issues in the cloud environment.")
 
-        st.write(f"Number of images uploaded: {len(uploaded_files)}")
+        st.write(f"📁 Number of images uploaded: {len(uploaded_files)}")
+        st.write("")  # Add spacing
 
         with st.form("video_settings"):
-            st.subheader("Sequence Settings 🎛️")
+            st.header("Sequence Settings 🎛️")
+            st.write("")  # Add spacing
             
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns([1, 1, 1])
             
             with col1:
                 filename = st.text_input(
                     "Video Name 📝",
-                    value="my_slideshow",
+                    value="my_sequence",
                     help="Enter a name for your video file"
                 )
+                st.write("")  # Add spacing
+
+            with col2:
                 image_duration = st.slider(
                     "Image Duration ⏱️",
                     min_value=1.0,
@@ -148,16 +171,11 @@ def main():
                     step=0.5,
                     help="How long each image is displayed"
                 )
-                transition_type = st.selectbox(
-                    "Transition Type 🎭",
-                    options=['crossfade', 'fade_black'],
-                    format_func=lambda x: "Crossfade" if x == "crossfade" else "Fade to Black",
-                    help="Choose the transition effect between images"
-                )
+                st.write("")  # Add spacing
 
-            with col2:
+            with col3:
                 quality = st.selectbox(
-                    "Quality 🎥",
+                    "Video Quality 🎥",
                     options=[
                         '350k',
                         '500k',
@@ -165,46 +183,26 @@ def main():
                         '1000k'
                     ],
                     format_func=lambda x: {
-                        '350k': 'Ultra Light (350k)',
-                        '500k': 'Light (500k)',
-                        '750k': 'Standard (750k)',
-                        '1000k': 'High (1000k)'
+                        '350k': 'Light (350k)',
+                        '500k': 'Standard (500k)',
+                        '750k': 'High (750k)',
+                        '1000k': 'Ultra (1000k)'
                     }[x],
                     help="Higher quality = larger file size"
                 )
-                
-                resolution_options = {
-                    'Square 1024x1024 (from 1024x512)': (1024, 512, 'anamorphic'),
-                    'Square 2048x2048 (from 2048x1024)': (2048, 1024, 'anamorphic'),
-                    'Square 512x512': (512, 512, 'square'),
-                    'Square 1024x1024': (1024, 1024, 'square'),
-                    'Square 2048x2048': (2048, 2048, 'square')
-                }
-                
-                resolution = st.selectbox(
-                    "Resolution 📐",
-                    options=list(resolution_options.keys()),
-                    help="Select output resolution"
-                )
 
-                transition_duration = st.slider(
-                    "Transition Duration 🔄",
-                    min_value=0.0,
-                    max_value=10.0,
-                    value=3.0,
-                    step=0.25,
-                    help="Duration of transition effect between images"
-                )
-
+            st.write("")  # Add spacing
             randomize = st.checkbox(
-                "Randomize Images 🎲",
+                "Randomize Image Order 🎲",
                 value=True,
                 help="Randomly shuffle the order of images"
             )
             
+            st.write("")  # Add spacing
             generate_button = st.form_submit_button(
-                "Generate Sequence 🎛️",
-                help="Click to create your video"
+                "Generate Sequence 🎬",
+                help="Click to create your video",
+                use_container_width=True
             )
 
             if generate_button:
@@ -218,10 +216,7 @@ def main():
                         settings = {
                             'filename': filename,
                             'image_duration': image_duration,
-                            'transition_duration': transition_duration,
-                            'transition_type': transition_type,
                             'quality': quality,
-                            'resolution': resolution_options[resolution]
                         }
 
                         output_path = st.session_state.generator.generate_video(image_files, settings)
@@ -231,10 +226,10 @@ def main():
                                 label="Download Video 📥",
                                 data=f,
                                 file_name=f"{filename}.mp4",
-                                mime="video/mp4"
+                                mime="video/mp4",
+                                use_container_width=True
                             )
                         
-                        # Clean up after successful generation
                         st.session_state.generator.cleanup()
                         st.session_state.generator = SlideshowGenerator()
 
