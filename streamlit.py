@@ -3,11 +3,8 @@ import os
 import random
 import uuid
 import tempfile
-import warnings
 from PIL import Image
 import shutil
-import subprocess
-import cv2
 import numpy as np
 import imageio
 
