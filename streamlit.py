@@ -8,6 +8,13 @@ import shutil
 import numpy as np
 import imageio
 from moviepy.editor import ImageSequenceClip
+import re
+import nltk
+from nltk.tokenize import sent_tokenize
+import pandas as pd
+import requests
+from bs4 import BeautifulSoup
+import json
 
 class SlideshowGenerator:
     def __init__(self):
@@ -93,6 +100,41 @@ class SlideshowGenerator:
 
         except Exception as e:
             raise e
+
+def search_gutenberg(query):
+    """Search Project Gutenberg catalog"""
+    base_url = "https://gutendex.com/books/"
+    params = {'search': query}
+    
+    try:
+        response = requests.get(base_url, params=params)
+        data = response.json()
+        
+        books = []
+        for book in data['results']:
+            books.append({
+                'title': book['title'],
+                'author': book['authors'][0]['name'] if book['authors'] else 'Unknown',
+                'id': book['id'],
+                'download_count': book['download_count'],
+                'languages': book['languages'],
+                'text_url': next((fmt['url'] for fmt in book['formats'].values() 
+                                if '.txt' in fmt['url']), None)
+            })
+        
+        return books
+    except Exception as e:
+        st.error(f"Error searching Gutenberg: {e}")
+        return []
+
+def fetch_book_text(url):
+    """Fetch book text from URL"""
+    try:
+        response = requests.get(url)
+        return response.text
+    except Exception as e:
+        st.error(f"Error fetching book: {e}")
+        return None
 
 def main():
     st.set_page_config(
