@@ -1,14 +1,9 @@
-# TribeXR Slideshow Utility
+# Book Chapter Splitter
 
-A professional visual sequence generator for TribeXR performances and events.
+A Streamlit application for processing public domain books into organized chapters and sections.
 
 ## Features
-- Upload and process multiple images
-- Create seamless transitions
-- Customizable duration and effects
-- Multiple resolution options
-- Optimized for TribeXR performance
-
-## Installation
-1. Clone the repository
-2. Install requirements: 
+- Search Project Gutenberg books
+- Split books into chapters
+- Create 500-byte sections
+- Export in organized format 
