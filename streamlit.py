@@ -6,6 +6,12 @@ import pandas as pd
 import requests
 import json
 
+# Download required NLTK data
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
+
 def search_gutenberg(query):
     """Search Project Gutenberg catalog"""
     base_url = "https://gutendex.com/books/"
